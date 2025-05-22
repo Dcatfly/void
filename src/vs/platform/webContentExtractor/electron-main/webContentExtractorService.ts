@@ -6,6 +6,8 @@
 import { BrowserWindow } from 'electron';
 import { IWebContentExtractorService } from '../common/webContentExtractor.js';
 import { URI } from '../../../base/common/uri.js';
+import { IConfigurationService } from '../../../configuration/common/configuration.js';
+import { inject } from '../../../instantiation/common/instantiation.js';
 import { AXNode, convertToReadibleFormat } from './cdpAccessibilityDomain.js';
 import { Limiter } from '../../../base/common/async.js';
 import { ResourceMap } from '../../../base/common/map.js';
@@ -23,6 +25,10 @@ export class NativeWebContentExtractorService implements IWebContentExtractorSer
 	private _limiter = new Limiter<string>(3);
 	private _webContentsCache = new ResourceMap<CacheEntry>();
 	private readonly _cacheDuration = 24 * 60 * 60 * 1000; // 1 day in milliseconds
+
+	constructor(
+		@inject(IConfigurationService) private readonly _configurationService: IConfigurationService
+	) { }
 
 	private isExpired(entry: CacheEntry): boolean {
 		return Date.now() - entry.timestamp > this._cacheDuration;
@@ -45,6 +51,9 @@ export class NativeWebContentExtractorService implements IWebContentExtractorSer
 			}
 		}
 
+		const proxyUrl = this._configurationService.getValue<string>('http.proxy');
+		const noProxy = this._configurationService.getValue<string[]>('http.noProxy');
+
 		const win = new BrowserWindow({
 			width: 800,
 			height: 600,
@@ -57,6 +66,12 @@ export class NativeWebContentExtractorService implements IWebContentExtractorSer
 			}
 		});
 		try {
+			if (proxyUrl) {
+				const proxyBypassRules = noProxy ? [...noProxy, '<local>'].join(',') : '<local>';
+				await win.webContents.session.setProxy({ proxyRules: proxyUrl, proxyBypassRules });
+			} else {
+				await win.webContents.session.setProxy({ proxyRules: '' });
+			}
 			await win.loadURL(uri.toString(true));
 			win.webContents.debugger.attach('1.1');
 			const result: { nodes: AXNode[] } = await win.webContents.debugger.sendCommand('Accessibility.getFullAXTree');
